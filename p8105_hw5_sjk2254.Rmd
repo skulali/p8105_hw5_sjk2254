@@ -1,0 +1,12 @@
+---
+title: "p8105_hw5_sjk2254"
+author: "Sharon Kulali"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+# loading the needed packages
+
+library(tidyverse)
+```
+
