@@ -4,9 +4,59 @@ author: "Sharon Kulali"
 output: github_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup}
 # loading the needed packages
 
 library(tidyverse)
+```
+
+# Problem 1
+
+```{r}
+# importing the data
+
+homicides_df = 
+  read_csv("data/homicide-data.csv") |> 
+  mutate(city_state = paste(city, state, sep = ",")) 
+```
+
+```{r}
+# total number of homicides
+
+homicides_df |>
+  group_by(city) |> 
+  summarise(count = n())
+
+# number of unsolved homicides
+
+homicides_df |>
+  filter(disposition %in% c("Closed without arrest", "Open/No arrest")) |> 
+  group_by(city) |> 
+  summarise(unsolved_count = n())
+
+homicides_df |>
+  filter(disposition %in% c("Closed without arrest", "Open/No arrest")) |> 
+  group_by(city) |> 
+  summarise(unsolved_count = n()) |> 
+  pull(unsolved_count) |> 
+  sum()
+```
+
+```{r}
+# number of unsolved homicides in Baltimore
+
+homicides_df |>
+  filter(city == "Baltimore") |> 
+  summarise(count = n())
+
+homicides_df |> 
+  filter(city == "Baltimore",
+         disposition %in% c("Closed without arrest", "Open/No arrest")) |> 
+  summarise(unsolved_count = n())
+
+bpt =
+  prop.test(x = 1825, n = 2827) |> 
+  broom::tidy() |> 
+  select(estimate, conf.low, conf.high)
 ```
 
