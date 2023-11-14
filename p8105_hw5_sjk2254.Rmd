@@ -4,7 +4,7 @@ author: "Sharon Kulali"
 output: github_document
 ---
 
-```{r setup}
+```{r setup, message = F}
 # loading the needed packages
 
 library(tidyverse)
@@ -28,15 +28,21 @@ scale_fill_discrete = scale_fill_viridis_d
 
 # Problem 1
 
-```{r}
-# importing the data
+```{r import}
+# importing and cleaning the data
 
 homicides_df = 
-  read_csv("data/homicide-data.csv") |> 
-  mutate(city_state = paste(city, state, sep = ",")) 
+  read_csv("data/homicide-data.csv", na = c("", "NA", "Unknown")) |> 
+  mutate(city_state = paste(city, state, sep = ","),
+         resolution = case_when(
+          disposition == "Closed without arrest" ~ "unsolved",
+          disposition == "Open/No arrest"        ~ "unsolved",
+          disposition == "Closed by arrest"      ~ "solved")) |> 
+  filter(city_state != "Tulsa,AL") |> 
+  separate(reported_date, into = c("year", "month", "day"), sep = c(4, 6))
 ```
 
-```{r}
+```{r homicides count}
 # total number of homicides
 
 homicides_df |>
@@ -56,9 +62,21 @@ homicides_df |>
   summarise(unsolved_count = n()) |> 
   pull(unsolved_count) |> 
   sum()
+
+# total number of homicides and the number that are solved
+
+city_homicide_df = 
+  homicides_df |>  
+  select(city_state, disposition, resolution) |> 
+  group_by(city_state) |> 
+  summarize(
+    hom_total = n(),
+    hom_unsolved = sum(resolution == "unsolved"))
 ```
 
-```{r}
+The Washington Post has data on homicides over the past decade in 50 of the largest American cities. The `homicides_df` has information on the location of the killings, whether an arrest was made, and basic demographic information about each victim. The `homicides_df` data has `r nrow(homicides_df)` observations and `r ncol(homicides_df)` variables with information from years `r homicides_df |> pull(year) |> min()` to `r homicides_df |> pull(year) |> max()`. An average victim is `r homicides_df |> pull(victim_race) |> max(na.rm = T)`, `r homicides_df |> pull(victim_age) |> mean(na.rm = T) |> round(0)` years old, and `r homicides_df |> pull(victim_sex) |> max(na.rm = T)`. 
+
+```{r baltimore}
 # number of unsolved homicides in Baltimore
 
 homicides_df |>
@@ -70,15 +88,44 @@ homicides_df |>
          disposition %in% c("Closed without arrest", "Open/No arrest")) |> 
   summarise(unsolved_count = n())
 
-bpt =
-  prop.test(x = 1825, n = 2827) |> 
+# proportion of homicides that are unsolved in Baltimore
+
+prop.test(x = 1825, n = 2827) |> 
   broom::tidy() |> 
   select(estimate, conf.low, conf.high)
 ```
 
+```{r}
+# creating a function to estimate the proportion of homicides that are unsolved
+
+test_results = 
+  city_homicide_df |>
+  mutate(
+    prop_tests = map2(hom_unsolved, hom_total, \(x, y) prop.test(x = x, n = y)),
+    tidy_tests = map(prop_tests, broom::tidy)) |> 
+  select(-prop_tests) |>  
+  unnest(tidy_tests) |>  
+  select(city_state, estimate, conf.low, conf.high) |> 
+  mutate(city_state = fct_reorder(city_state, estimate))
+
+# plot that shows the estimates and CIs for each city
+
+test_results |> 
+  mutate(city_state = fct_reorder(city_state, estimate)) |> 
+  ggplot(aes(x = city_state, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Proportion of Unsolved Homicides in each City",
+       x = "City, State",
+       y = "Estimates and CI")
+```
+
+The plot above shows the proportion of unsolved homicides in each city. It appears that there is a very wide range in the rate at which homicides are solved. Noticeably, Chicago has the highest estimates and given it has the narrowst CI, it can be concluded that it has the highest rates of homicides. Tampa has an estimate closer to 0.45 with a wider CI which might indicate that homicides are less frequent. Lastly, Richmond has the lowest estimate around 0.20.
+
 # Problem 2
 
-```{r}
+```{r list files}
 # all the file names
 
 file_names = list.files(path = "data", pattern = "con|exp", full.names = TRUE)
@@ -95,107 +142,68 @@ data =
                names_to = "week", 
                values_to = "observation")|> 
   mutate(week = str_replace(week, "week_", ""),
-         week = as.numeric(week),
-         subject_id = as.numeric(subject_id))
+         week = as.numeric(week))
 ```
 
-```{r}
+```{r spaghetti}
 # creating a spaghetti plot showing observations of each subject over time
-
-ggplot(data, aes(x = week, y = observation, group = subject_id, color = arm)) +
-  geom_line() +
-  geom_point() +
-  labs(title = "Spaghetti Plot of Observations Over Time",
-       x = "Week",
-       y = "Observation",
-       color = "Arm")
 
 data |> 
   group_by(arm) |> 
   ggplot(aes(x = week, y = observation, color = subject_id)) +
   geom_line() +
-  facet_grid(.~arm)
+  geom_point() +
+  facet_grid(.~arm) +
+  labs(title = "Spaghetti Plot of Observations Over Time",
+       x = "Week",
+       y = "Observation",
+       color = "Arm")
 ```
+
+The spaghetti plot above shows the observations of each subject over the weeks between the control and experimental arm. You can see that in the control arm, observations stayed relatively consistent throughout the weeks for each subject. Additionally, some of the observation values go into the negative. While in the experimental arm, the observations increased throughout the weeks for each subject and apart from the first week, all the observation values stay in positives. 
 
 # Problem 3
 
-```{r}
-# function that obtains the estimate and p-value 5 times
+```{r function}
+# making a function that obtains the estimate and p-value 
 
-simulate_t_test = function(mu, n = 30, sigma = 5, alpha = 0.05, num_simulations = 5) {
-  set.seed(123)
+set.seed(123)
 
-  estimates = numeric(num_simulations)
-  p_values = numeric(num_simulations)
+ttest_function = function(n = 30, mu = 0, sigma = 5) {
   
-  for (i in 1:num_simulations) {
-    data = rnorm(n, mean = mu, sd = sigma)
-    t_test_result = broom::tidy(t.test(data, mu = 0, alternative = "two.sided"))
-    
-    estimates[i] = t_test_result$estimate
-    p_values[i] = t_test_result$p.value
-  }
+  sim_data = 
+    tibble(x = rnorm(n, mean = mu, sd = sigma))
   
-  result_df = data.frame(mu = mu, estimate = estimates, p_value = p_values)
-  return(result_df)
+  test = t.test(x ~ 1, data = sim_data) |> 
+    broom::tidy() |> 
+    select(estimate, p.value)
+  
+  return(test)
 }
-
-mu_values = 0:6
-
-simulation_results = data.frame()
-
-for (mu_val in mu_values) {
-  result = simulate_t_test(mu = mu_val)
-  simulation_results = bind_rows(simulation_results, result)
-}
-
-head(simulation_results)
-summary(simulation_results)
 ```
 
 
-```{r, eval = F}
-# function that obtains the estimate and p-value 5 times
+```{r sim df}
+# making a dataframe that obtains the estimate and p-value for 5000 simulations
 
-simulate_t_test = function(mu, n = 30, sigma = 5, alpha = 0.05, num_simulations = 5000) {
-  set.seed(123)
-
-  estimates = numeric(num_simulations)
-  p_values = numeric(num_simulations)
-  
-  for (i in 1:num_simulations) {
-    data = rnorm(n, mean = mu, sd = sigma)
-    t_test_result = broom::tidy(t.test(data, mu = 0, alternative = "two.sided"))
-    
-    estimates[i] = t_test_result$estimate
-    p_values[i] = t_test_result$p.value
-  }
-  
-  result_df = data.frame(mu = mu, estimate = estimates, p_value = p_values)
-  return(result_df)
-}
-
-mu_values = c(0, 1, 2, 3, 4, 5, 6)
-
-simulation_results = data.frame()
-
-for (mu_val in mu_values) {
-  result = simulate_t_test(mu = mu_val)
-  simulation_results = bind_rows(simulation_results, result)
-}
-
-head(simulation_results)
-summary(simulation_results)
+sim_results_df = 
+  tibble(mu = 0:6) |> 
+  mutate(
+    output_df = map(mu, ~rerun(5000, ttest_function(n = 30, mu = .x))),
+    estimate_df = map(output_df, bind_rows)
+  ) |> 
+  select(-output_df)
 ```
 
-```{r, eval = F}
+
+```{r prop plot}
 # plot showing the proportion of times the null was rejected
 
-power_data = simulation_results |> 
+sim_results_df |> 
+  unnest(estimate_df) |> 
   group_by(mu) |> 
-  summarize(power = mean(p_value < 0.05))
-
-ggplot(power_data, aes(x = mu, y = power)) +
+  summarise(power = mean(p.value < 0.05)) |> 
+  ggplot(aes(x = mu, y = power)) + 
   geom_line() +
   geom_point() +
   labs(title = "Power of the Test",
@@ -204,16 +212,19 @@ ggplot(power_data, aes(x = mu, y = power)) +
        color = "Arm")
 ```
 
-```{r}
+The plot above shows the proportion of times the null was rejected, power, compared to the true value of mu. You can see that as the power of the test increases, so does the true value of mu. Additionally, the variability of the effect size decreases as you increase power.
+
+```{r average plot}
 # plot showing average estimate of mu compared to the the true value of mu
 
 average_estimate_all = 
-  simulation_results |> 
-  group_by(mu) |> 
+  sim_results_df |> 
+  unnest(estimate_df) |> 
+  group_by(mu) |>  
   summarize(average_estimate = mean(estimate))
 
 ggplot(average_estimate_all, aes(x = mu, y = average_estimate)) +
-  geom_line() +
+  geom_path() +
   geom_point() +
   labs(title = "Average Estimate of μ",
        x = "True μ",
@@ -221,12 +232,13 @@ ggplot(average_estimate_all, aes(x = mu, y = average_estimate)) +
        color = "Arm")
 ```
 
-```{r}
+```{r, true plot}
 # plot showing average estimate of mu compared to the the true value of mu when null was rejected
 
 average_estimate_rejected = 
-  simulation_results |> 
-  filter(p_value < 0.05) |> 
+  sim_results_df |> 
+  unnest(estimate_df) |> 
+  filter(p.value < 0.05) |> 
   group_by(mu) |> 
   summarize(average_estimate_rejected = mean(estimate))
 
@@ -240,4 +252,6 @@ ggplot() +
        y = "Average Estimate",
        color = "Arm")
 ```
+
+The first plot shows the average estimate of mu compared to the true value of mu. You can see that as the average estimate increase, so does the true mu. There is a positive, linear relationship. The second plot shows the average estimate of mu in samples where the null was rejected (red line) and for all (black line) compared to the true value of mu. In the rejected samples, there appears to be a right skewed distribution of the line. For smaller values of the true mu, there is less of a linear relationship compared to higher values of the true mu where you can clearly see a positive, linear relationship. More specifically, the sample average of mu across tests for which the null is rejected isn't equal to the true value of mu for smaller values of the average estimate and true mu but it is for larger values of true mu and average estimate. The higher your estimate, the closer you are to predicting the true mu in your samples. 
 
