@@ -8,6 +8,22 @@ output: github_document
 # loading the needed packages
 
 library(tidyverse)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
 ```
 
 # Problem 1
@@ -58,5 +74,170 @@ bpt =
   prop.test(x = 1825, n = 2827) |> 
   broom::tidy() |> 
   select(estimate, conf.low, conf.high)
+```
+
+# Problem 2
+
+```{r}
+# all the file names
+
+file_names = list.files(path = "data", pattern = "con|exp", full.names = TRUE)
+
+# extracting information from the files
+
+data = 
+  file_names |> 
+  purrr::map(~ read.csv(.x) |> 
+  mutate(subject_id = str_extract(.x, "\\d+"),
+         arm = str_extract(.x, "con|exp"))) |> 
+  bind_rows() |> 
+  pivot_longer(cols = starts_with("week_"), 
+               names_to = "week", 
+               values_to = "observation")|> 
+  mutate(week = str_replace(week, "week_", ""),
+         week = as.numeric(week),
+         subject_id = as.numeric(subject_id))
+```
+
+```{r}
+# creating a spaghetti plot showing observations of each subject over time
+
+ggplot(data, aes(x = week, y = observation, group = subject_id, color = arm)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Spaghetti Plot of Observations Over Time",
+       x = "Week",
+       y = "Observation",
+       color = "Arm")
+
+data |> 
+  group_by(arm) |> 
+  ggplot(aes(x = week, y = observation, color = subject_id)) +
+  geom_line() +
+  facet_grid(.~arm)
+```
+
+# Problem 3
+
+```{r}
+# function that obtains the estimate and p-value 5 times
+
+simulate_t_test = function(mu, n = 30, sigma = 5, alpha = 0.05, num_simulations = 5) {
+  set.seed(123)
+
+  estimates = numeric(num_simulations)
+  p_values = numeric(num_simulations)
+  
+  for (i in 1:num_simulations) {
+    data = rnorm(n, mean = mu, sd = sigma)
+    t_test_result = broom::tidy(t.test(data, mu = 0, alternative = "two.sided"))
+    
+    estimates[i] = t_test_result$estimate
+    p_values[i] = t_test_result$p.value
+  }
+  
+  result_df = data.frame(mu = mu, estimate = estimates, p_value = p_values)
+  return(result_df)
+}
+
+mu_values = 0:6
+
+simulation_results = data.frame()
+
+for (mu_val in mu_values) {
+  result = simulate_t_test(mu = mu_val)
+  simulation_results = bind_rows(simulation_results, result)
+}
+
+head(simulation_results)
+summary(simulation_results)
+```
+
+
+```{r, eval = F}
+# function that obtains the estimate and p-value 5 times
+
+simulate_t_test = function(mu, n = 30, sigma = 5, alpha = 0.05, num_simulations = 5000) {
+  set.seed(123)
+
+  estimates = numeric(num_simulations)
+  p_values = numeric(num_simulations)
+  
+  for (i in 1:num_simulations) {
+    data = rnorm(n, mean = mu, sd = sigma)
+    t_test_result = broom::tidy(t.test(data, mu = 0, alternative = "two.sided"))
+    
+    estimates[i] = t_test_result$estimate
+    p_values[i] = t_test_result$p.value
+  }
+  
+  result_df = data.frame(mu = mu, estimate = estimates, p_value = p_values)
+  return(result_df)
+}
+
+mu_values = c(0, 1, 2, 3, 4, 5, 6)
+
+simulation_results = data.frame()
+
+for (mu_val in mu_values) {
+  result = simulate_t_test(mu = mu_val)
+  simulation_results = bind_rows(simulation_results, result)
+}
+
+head(simulation_results)
+summary(simulation_results)
+```
+
+```{r, eval = F}
+# plot showing the proportion of times the null was rejected
+
+power_data = simulation_results |> 
+  group_by(mu) |> 
+  summarize(power = mean(p_value < 0.05))
+
+ggplot(power_data, aes(x = mu, y = power)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Power of the Test",
+       x = "True μ",
+       y = "Proportion of Rejections",
+       color = "Arm")
+```
+
+```{r}
+# plot showing average estimate of mu compared to the the true value of mu
+
+average_estimate_all = 
+  simulation_results |> 
+  group_by(mu) |> 
+  summarize(average_estimate = mean(estimate))
+
+ggplot(average_estimate_all, aes(x = mu, y = average_estimate)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Average Estimate of μ",
+       x = "True μ",
+       y = "Average Estimate",
+       color = "Arm")
+```
+
+```{r}
+# plot showing average estimate of mu compared to the the true value of mu when null was rejected
+
+average_estimate_rejected = 
+  simulation_results |> 
+  filter(p_value < 0.05) |> 
+  group_by(mu) |> 
+  summarize(average_estimate_rejected = mean(estimate))
+
+ggplot() +
+  geom_line(data = average_estimate_all, aes(x = mu, y = average_estimate), color = "black") +
+  geom_point(data = average_estimate_all, aes(x = mu, y = average_estimate), color = "black") +
+  geom_line(data = average_estimate_rejected, aes(x = mu, y = average_estimate_rejected), color = "red") +
+  geom_point(data = average_estimate_rejected, aes(x = mu, y = average_estimate_rejected), color = "red") +
+  labs(title = "Average Estimate of μ (All and Rejected Samples)",
+       x = "True μ",
+       y = "Average Estimate",
+       color = "Arm")
 ```
 
