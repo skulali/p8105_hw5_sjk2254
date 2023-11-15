@@ -212,7 +212,7 @@ sim_results_df |>
        color = "Arm")
 ```
 
-The plot above shows the proportion of times the null was rejected, power, compared to the true value of mu. You can see that as the power of the test increases, so does the true value of mu. Additionally, the variability of the effect size decreases as you increase power.
+The plot above shows the proportion of times the null was rejected, power, compared to the true value of mu. You can see that as the power of the test increases, so does the true value of mu. Additionally, the variability of the effect size increases as you increase power. With a mu from 0 to 4, there is a rapid increase then it levels out for mu from 4 to 6.
 
 ```{r average plot}
 # plot showing average estimate of mu compared to the the true value of mu
